@@ -29,6 +29,11 @@ dependencies = [
     "lesscpy==0.15.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/uandysmith/vue-collector"
+Repository = "https://github.com/uandysmith/vue-collector"
+Issues = "https://github.com/uandysmith/vue-collector/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/vue_collector"]
 
