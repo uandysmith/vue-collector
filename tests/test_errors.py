@@ -184,9 +184,14 @@ class TestScriptErrors(unittest.TestCase):
         self.assertIn('[script]', str(err))
 
     def test_valid_script_no_error(self):
-        content = '<template><div></div></template>\n<script>export default { name: "x" }</script>'
+        content = '<template><div></div></template>\n<script>export default { data() { return {} } }</script>'
         vc = VueComponent('X.vue', content)
-        self.assertEqual(vc.component, 'name: "x"')
+        self.assertEqual(vc.component, 'data() { return {} }')
+
+    def test_name_property_raises(self):
+        err = self._raises("export default { name: 'X', data() { return {} } }")
+        self.assertEqual(err.section, 'script')
+        self.assertIn('name', err.message)
 
 
 class TestStyleErrors(unittest.TestCase):

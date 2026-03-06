@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vue-collector"
-version = "0.1.0"
+version = "0.2.0"
 description = "Collect Vue single-file components into a single HTML file for browser use"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,7 +27,11 @@ classifiers = [
 ]
 dependencies = [
     "lesscpy==0.15.1",
+    "six",
 ]
+
+[project.scripts]
+vue-collector = "vue_collector.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/uandysmith/vue-collector"

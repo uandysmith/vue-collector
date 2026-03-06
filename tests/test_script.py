@@ -1,6 +1,6 @@
 import unittest
 
-from vue_collector.script import _extract_export_default, _has_import, _parse_script
+from vue_collector.script import _extract_export_default, _has_import, _has_name_key, _parse_script
 
 
 class TestExtractExportDefault(unittest.TestCase):
@@ -181,27 +181,27 @@ class TestParseScript(unittest.TestCase):
         self.assertEqual(_parse_script('X', 'export default {}'), ('', ''))
 
     def test_simple_component(self):
-        variables, component = _parse_script('X', 'export default { name: "x" }')
+        variables, component = _parse_script('X', 'export default { data() { return {} } }')
         self.assertEqual(variables, '')
-        self.assertEqual(component, 'name: "x"')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_variables_before_export(self):
-        raw = 'const helper = () => {}\nexport default { name: "x" }'
+        raw = 'const helper = () => {}\nexport default { data() { return {} } }'
         variables, component = _parse_script('X', raw)
         self.assertEqual(variables, 'const helper = () => {}')
-        self.assertEqual(component, 'name: "x"')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_variables_after_export(self):
-        raw = 'export default { name: "x" }\nconst after = 1'
+        raw = 'export default { data() { return {} } }\nconst after = 1'
         variables, component = _parse_script('X', raw)
         self.assertEqual(variables, 'const after = 1')
-        self.assertEqual(component, 'name: "x"')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_variables_before_and_after_export(self):
-        raw = 'const a = 1\nexport default { name: "x" }\nconst b = 2'
+        raw = 'const a = 1\nexport default { data() { return {} } }\nconst b = 2'
         variables, component = _parse_script('X', raw)
         self.assertEqual(variables, 'const a = 1\nconst b = 2')
-        self.assertEqual(component, 'name: "x"')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_raises_on_script_with_content_but_no_export_default(self):
         with self.assertRaises(ValueError):
@@ -212,10 +212,9 @@ class TestParseScript(unittest.TestCase):
             _parse_script('Bad', "export default 'string'")
 
     def test_multiline_component_body(self):
-        raw = "\nexport default {\n  name: 'comp',\n  data() { return { x: 1 } }\n}\n"
+        raw = "\nexport default {\n  data() { return { x: 1 } }\n}\n"
         variables, component = _parse_script('Comp', raw)
         self.assertEqual(variables, '')
-        self.assertIn("name: 'comp'", component)
         self.assertIn('data() { return { x: 1 } }', component)
 
     def test_raises_on_import_before_export(self):
@@ -229,17 +228,64 @@ class TestParseScript(unittest.TestCase):
             _parse_script('X', raw)
 
     def test_const_before_export_allowed(self):
-        raw = 'const helper = () => {}\nexport default { name: "x" }'
+        raw = 'const helper = () => {}\nexport default { data() { return {} } }'
         variables, component = _parse_script('X', raw)
         self.assertEqual(variables, 'const helper = () => {}')
-        self.assertEqual(component, 'name: "x"')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_import_word_inside_template_literal_not_raised(self):
         # A template literal variable that contains the word 'import' must not be rejected
-        raw = "const docs = `\nimport { ref } from 'vue'\n`\nexport default { name: 'X' }"
+        raw = "const docs = `\nimport { ref } from 'vue'\n`\nexport default { data() { return {} } }"
         variables, component = _parse_script('X', raw)
         self.assertIn('docs', variables)
-        self.assertEqual(component, "name: 'X'")
+        self.assertEqual(component, 'data() { return {} }')
+
+    def test_trailing_semicolon_after_export_default_not_in_variables(self):
+        # export default { ... }; — the trailing ';' must NOT end up in variables
+        raw = 'export default {\n  data() { return {} }\n};'
+        variables, component = _parse_script('Foo', raw)
+        self.assertEqual(variables, '')
+        self.assertEqual(component, 'data() { return {} }')
+
+    def test_code_after_export_default_semicolon_captured(self):
+        # export default { ... }; const X = 1; — only the real code after ';' goes into variables
+        raw = 'export default { data() { return {} } };\nconst X = 1;'
+        variables, _ = _parse_script('Foo', raw)
+        self.assertEqual(variables, 'const X = 1;')
+
+
+class TestHasNameKey(unittest.TestCase):
+    def test_top_level_name_key_returns_true(self):
+        self.assertTrue(_has_name_key('name: "x"'))
+
+    def test_top_level_name_key_with_comma_returns_true(self):
+        self.assertTrue(_has_name_key("name: 'x',\n  data() { return {} }"))
+
+    def test_name_inside_nested_object_returns_false(self):
+        # 'name' at depth > 0 (inside data() return value) must not match
+        self.assertFalse(_has_name_key('data() { return { name: "x" } }'))
+
+    def test_name_inside_string_literal_returns_false(self):
+        self.assertFalse(_has_name_key('label: "name: foo"'))
+
+    def test_name_inside_single_quote_string_returns_false(self):
+        self.assertFalse(_has_name_key("label: 'name: foo'"))
+
+    def test_name_as_part_of_longer_identifier_returns_false(self):
+        # 'namespace' starts with 'name' but is not 'name:'
+        self.assertFalse(_has_name_key('namespace: "x"'))
+
+    def test_empty_body_returns_false(self):
+        self.assertFalse(_has_name_key(''))
+
+    def test_name_after_comma_returns_true(self):
+        self.assertTrue(_has_name_key('data() { return {} },\nname: "x"'))
+
+    def test_name_inside_line_comment_returns_false(self):
+        self.assertFalse(_has_name_key('// name: "x"\ndata() { return {} }'))
+
+    def test_name_inside_block_comment_returns_false(self):
+        self.assertFalse(_has_name_key('/* name: "x" */\ndata() { return {} }'))
 
 
 if __name__ == '__main__':

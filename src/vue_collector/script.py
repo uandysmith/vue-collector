@@ -75,7 +75,10 @@ def _extract_export_default(script: str) -> tuple[str, str, str]:
             depth -= 1
             if depth == 0:
                 component_body = rest[opening + 1 : i].strip()
-                after = rest[i + 1 :].strip()
+                remainder = rest[i + 1 :].lstrip()
+                if remainder.startswith(';'):
+                    remainder = remainder[1:]
+                after = remainder.strip()
                 return before, component_body, after
             i += 1
 
@@ -124,6 +127,49 @@ def _has_import(code: str) -> bool:
     return False
 
 
+def _has_name_key(component: str) -> bool:
+    """Return True if the object body has a top-level 'name' key.
+
+    Uses _js_advance to skip string literals and comments, and tracks brace
+    depth so that 'name:' inside nested objects (e.g. data() return values)
+    is not falsely matched.
+    """
+    i = 0
+    n = len(component)
+    at_key_start = True
+    depth = 0
+    while i < n:
+        c = component[i]
+        if c in ('"', "'", '`') or (c == '/' and i + 1 < n and component[i + 1] in ('/', '*')):
+            at_key_start = False
+            i = _js_advance(component, i)
+        elif c == '{':
+            depth += 1
+            at_key_start = True
+            i += 1
+        elif c == '}':
+            depth -= 1
+            at_key_start = True
+            i += 1
+        elif c in ('\n', ',') and depth == 0:
+            at_key_start = True
+            i += 1
+        elif c in (' ', '\t', '\r') and at_key_start:
+            i += 1
+        elif at_key_start and depth == 0 and component[i : i + 4] == 'name':
+            j = i + 4
+            while j < n and component[j] in (' ', '\t'):
+                j += 1
+            if j < n and component[j] == ':':
+                return True
+            at_key_start = False
+            i += 1
+        else:
+            at_key_start = False
+            i += 1
+    return False
+
+
 def _parse_script(name: str, raw: str) -> tuple[str, str]:
     """Parse a <script> section and return (variables, component_body).
 
@@ -142,4 +188,8 @@ def _parse_script(name: str, raw: str) -> tuple[str, str]:
         raise ValueError(f'Component {name} contains import statements which are not supported')
     if raw.strip() and not component:
         raise ValueError(f'Invalid component {name}: export default not found or not an object')
+    if _has_name_key(component):
+        raise ValueError(
+            f'Component {name} must not define "name" — it is auto-generated from the filename'
+        )
     return variables, component

@@ -45,9 +45,10 @@ class TestVueComponentCounter(unittest.TestCase):
         )
 
     def test_component_body(self):
-        self.assertIn("name: 'Counter'", self.vc.component)
-        self.assertIn('return { count: 0 }', self.vc.component)
-        self.assertIn('increment() { this.count++ }', self.vc.component)
+        self.assertEqual(
+            self.vc.component,
+            "data() {\n    return { count: 0 }\n  },\n  methods: {\n    increment() { this.count++ }\n  }",
+        )
 
     def test_variables_empty(self):
         self.assertEqual(self.vc.variables, '')
@@ -90,10 +91,13 @@ class TestVueComponentItemList(unittest.TestCase):
         self.vc = VueComponent('ItemList.vue', read_fixture('ItemList.vue'))
 
     def test_variables_contains_const(self):
-        self.assertIn('const PAGE_SIZE = 10', self.vc.variables)
+        self.assertEqual(self.vc.variables, 'const PAGE_SIZE = 10')
 
-    def test_component_body_contains_name(self):
-        self.assertIn("name: 'ItemList'", self.vc.component)
+    def test_component_body(self):
+        self.assertEqual(
+            self.vc.component,
+            "data() {\n    return { items: [], pageSize: PAGE_SIZE }\n  }",
+        )
 
     def test_template_passes_vue_directives_through(self):
         self.assertIn('v-for="item in items"', self.vc.template)
