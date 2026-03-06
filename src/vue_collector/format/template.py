@@ -45,7 +45,7 @@ class _TemplateFormatter(HTMLParser):
             if tag == 'pre':
                 self._pre_depth -= 1
                 if self._pre_depth == 0:
-                    self._out.append('\n' + '  ' * self._indent + f'</{tag}>')
+                    self._out.append(f'</{tag}>')  # no leading \n: content is raw, </pre> follows it directly
                     return
             self._out.append(f'</{tag}>')
             return
