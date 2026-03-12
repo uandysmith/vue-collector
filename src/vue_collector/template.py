@@ -112,6 +112,12 @@ class CustomHTML(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if self._is_root_boundary(tag):
+            if self.levels[tag] > 0:
+                # Already inside this root section — treat as a nested inner tag (named slot, v-if, etc.)
+                self._append_open_tag(tag, attrs)
+                if self.current_root_tag == 'template' and tag not in self.VOID_ELEMENTS:
+                    self.inner_stack.append(tag)
+                return
             if self.section_counts[tag] > 0:
                 raise ValueError(f'Duplicate <{tag}> section')
             self.section_counts[tag] += 1
@@ -128,6 +134,14 @@ class CustomHTML(HTMLParser):
         if tag in self.VOID_ELEMENTS:
             return
         if self._is_root_boundary(tag):
+            if self.inner_stack and tag in self.inner_stack:
+                # Nested root-tag closing (e.g., </template> for a named slot inside <template>)
+                if self.current_root_tag == 'template':
+                    expected = self.inner_stack.pop()
+                    if expected != tag:
+                        raise ValueError(f'Mismatched tag: expected </{expected}>, got </{tag}>')
+                self.content[self.current_root_tag].append(f'</{tag}>')
+                return
             if tag == 'template' and self.inner_stack:
                 raise ValueError(f'Unclosed tag <{self.inner_stack[-1]}> in <template>')
             self.levels[tag] -= 1

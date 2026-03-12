@@ -257,5 +257,38 @@ class TestPrepareCompiled(unittest.TestCase):
         self.assertIn(f'[data-v-{sid}]', result)
 
 
+class TestNamedSlots(unittest.TestCase):
+    """Named slots via nested <template> must parse without errors."""
+
+    def test_named_slot_component(self):
+        vue = (
+            '<template>'
+            '<div><template #header><h1>Hi</h1></template></div>'
+            '</template>'
+            '<script>export default {}</script>'
+        )
+        comp = VueComponent('Slotted.vue', vue)
+        self.assertEqual(comp.raw_template, '<div><template #header><h1>Hi</h1></template></div>')
+
+    def test_multiple_named_slots_component(self):
+        vue = (
+            '<template>'
+            '<div>'
+            '<template #header><h1>Head</h1></template>'
+            '<template #footer><p>Foot</p></template>'
+            '</div>'
+            '</template>'
+            '<script>export default {}</script>'
+        )
+        comp = VueComponent('MultiSlot.vue', vue)
+        self.assertEqual(
+            comp.raw_template,
+            '<div>'
+            '<template #header><h1>Head</h1></template>'
+            '<template #footer><p>Foot</p></template>'
+            '</div>',
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

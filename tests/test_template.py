@@ -252,5 +252,63 @@ class TestCaseSensitiveAttrs(unittest.TestCase):
         self.assertNotIn('viewBox=', content)
 
 
+class TestCustomHTMLNamedSlots(unittest.TestCase):
+    def _parse(self, content):
+        p = CustomHTML()
+        p.feed(content)
+        p.validate()
+        return p
+
+    def test_named_slot_hash_syntax(self):
+        p = self._parse('<template><template #header><h1>Title</h1></template></template>')
+        self.assertEqual(p.get_content('template'), '<template #header><h1>Title</h1></template>')
+
+    def test_named_slot_vslot_syntax(self):
+        p = self._parse('<template><template v-slot:body><p>body</p></template></template>')
+        self.assertEqual(p.get_content('template'), '<template v-slot:body><p>body</p></template>')
+
+    def test_template_v_if(self):
+        p = self._parse('<template><template v-if="ok"><span>yes</span></template></template>')
+        self.assertEqual(p.get_content('template'), '<template v-if="ok"><span>yes</span></template>')
+
+    def test_template_v_for(self):
+        p = self._parse('<template><template v-for="x in xs"><li>{{ x }}</li></template></template>')
+        self.assertEqual(
+            p.get_content('template'), '<template v-for="x in xs"><li>{{ x }}</li></template>'
+        )
+
+    def test_multiple_named_slots(self):
+        p = self._parse(
+            '<template><template #header>H</template><template #footer>F</template></template>'
+        )
+        self.assertEqual(
+            p.get_content('template'),
+            '<template #header>H</template><template #footer>F</template>',
+        )
+
+    def test_nested_template_inside_div(self):
+        p = self._parse('<template><div><template #slot><span>x</span></template></div></template>')
+        self.assertEqual(
+            p.get_content('template'), '<div><template #slot><span>x</span></template></div>'
+        )
+
+    def test_deeply_nested_templates(self):
+        p = self._parse(
+            '<template><template #a><template #b><span>deep</span></template></template></template>'
+        )
+        self.assertEqual(
+            p.get_content('template'),
+            '<template #a><template #b><span>deep</span></template></template>',
+        )
+
+    def test_section_count_still_one(self):
+        p = self._parse('<template><template #header>H</template></template>')
+        self.assertEqual(p.section_counts['template'], 1)
+
+    def test_closing_tag_in_content(self):
+        p = self._parse('<template><template #slot><div>x</div></template></template>')
+        self.assertEqual(p.get_content('template'), '<template #slot><div>x</div></template>')
+
+
 if __name__ == '__main__':
     unittest.main()

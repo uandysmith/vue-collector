@@ -65,6 +65,17 @@ class TestStructuralErrors(unittest.TestCase):
         self.assertIn('Duplicate', err.message)
         self.assertIn('template', err.message)
 
+    def test_nested_template_not_duplicate(self):
+        # Named slots use nested <template> — must NOT raise
+        content = (
+            '<template>'
+            '<div><template #header><h1>Hi</h1></template></div>'
+            '</template>'
+            '<script>export default {}</script>'
+        )
+        comp = VueComponent('Nested.vue', content)
+        self.assertEqual(comp.raw_template, '<div><template #header><h1>Hi</h1></template></div>')
+
     def test_duplicate_script(self):
         content = '<template></template><script>export default {}</script><script>export default {}</script>'
         err = self._raises(content)
