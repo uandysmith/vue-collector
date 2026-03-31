@@ -16,7 +16,7 @@ class TestCustomHTMLParser(unittest.TestCase):
 
     def test_extracts_style_content(self):
         parser = CustomHTML()
-        parser.feed('<template></template><style>.foo { color: red; }</style>')
+        parser.feed('<template></template><style lang="less">.foo { color: red; }</style>')
         self.assertEqual(parser.get_content('style'), '.foo { color: red; }')
 
     def test_absent_sections_return_empty_string(self):
@@ -60,7 +60,7 @@ class TestCustomHTMLParser(unittest.TestCase):
 
     def test_sections_are_independent(self):
         parser = CustomHTML()
-        parser.feed('<template><div>tpl</div></template><script>const x = 1</script><style>.a{}</style>')
+        parser.feed('<template><div>tpl</div></template><script>const x = 1</script><style lang="less">.a{}</style>')
         self.assertEqual(parser.get_content('template'), '<div>tpl</div>')
         self.assertEqual(parser.get_content('script'), 'const x = 1')
         self.assertEqual(parser.get_content('style'), '.a{}')
@@ -123,12 +123,12 @@ class TestVoidElements(unittest.TestCase):
 class TestCustomHTMLScoped(unittest.TestCase):
     def test_is_scoped_false_without_attribute(self):
         parser = CustomHTML()
-        parser.feed('<template><div></div></template><style>.foo{}</style>')
+        parser.feed('<template><div></div></template><style lang="less">.foo{}</style>')
         self.assertEqual(parser.is_scoped(), False)
 
     def test_is_scoped_true_with_scoped_attribute(self):
         parser = CustomHTML()
-        parser.feed('<template><div></div></template><style scoped>.foo{}</style>')
+        parser.feed('<template><div></div></template><style scoped lang="less">.foo{}</style>')
         self.assertEqual(parser.is_scoped(), True)
 
     def test_scope_id_added_to_plain_element(self):
@@ -171,7 +171,7 @@ class TestCustomHTMLScoped(unittest.TestCase):
 
     def test_scope_id_not_injected_in_style(self):
         parser = CustomHTML(scope_id='a1b2c3d4')
-        parser.feed('<template></template><style>.foo{color:red}</style>')
+        parser.feed('<template></template><style lang="less">.foo{color:red}</style>')
         self.assertEqual(parser.get_content('style'), '.foo{color:red}')
 
 
@@ -308,6 +308,26 @@ class TestCustomHTMLNamedSlots(unittest.TestCase):
     def test_closing_tag_in_content(self):
         p = self._parse('<template><template #slot><div>x</div></template></template>')
         self.assertEqual(p.get_content('template'), '<template #slot><div>x</div></template>')
+
+
+class TestHTMLComments(unittest.TestCase):
+    def _parse(self, content):
+        p = CustomHTML()
+        p.feed(content)
+        p.validate()
+        return p
+
+    def test_comment_preserved(self):
+        p = self._parse('<template><div><!-- hello --></div></template>')
+        self.assertEqual(p.get_content('template'), '<div><!-- hello --></div>')
+
+    def test_comment_between_elements(self):
+        p = self._parse('<template><div></div><!-- sep --><span></span></template>')
+        self.assertEqual(p.get_content('template'), '<div></div><!-- sep --><span></span>')
+
+    def test_comment_outside_sections_ignored(self):
+        p = self._parse('<!-- top -->  <template><div></div></template>')
+        self.assertEqual(p.get_content('template'), '<div></div>')
 
 
 if __name__ == '__main__':

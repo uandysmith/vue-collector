@@ -71,6 +71,12 @@ class _TemplateFormatter(HTMLParser):
         if stripped:
             self._out.append('\n' + '  ' * self._indent + stripped)
 
+    def handle_comment(self, data: str) -> None:
+        if self._pre_depth > 0:
+            self._out.append(f'<!--{data}-->')
+        else:
+            self._out.append('\n' + '  ' * self._indent + f'<!--{data}-->')
+
 
 def _format_template(html: str) -> str:
     if not html.strip():

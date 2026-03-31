@@ -14,6 +14,6 @@ export default {
   }
 }
 </script>
-<style>
+<style lang="less">
 .counter { display: flex; gap: 8px; }
 </style>

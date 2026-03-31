@@ -18,7 +18,7 @@ def _make(template='', script='', style=''):
     if script is not None:
         parts.append(f'<script>{script}</script>')
     if style is not None:
-        parts.append(f'<style>{style}</style>')
+        parts.append(f'<style lang="less">{style}</style>')
     return '\n'.join(parts)
 
 
@@ -84,7 +84,7 @@ class TestStructuralErrors(unittest.TestCase):
         self.assertIn('script', err.message)
 
     def test_duplicate_style(self):
-        content = '<template></template><style>.a{}</style><style>.b{}</style>'
+        content = '<template></template><style lang="less">.a{}</style><style lang="less">.b{}</style>'
         err = self._raises(content)
         self.assertIsNone(err.section)
         self.assertIn('Duplicate', err.message)
@@ -176,40 +176,54 @@ class TestScriptErrors(unittest.TestCase):
         err = self._raises('const x = 1')
         self.assertEqual(err.section, 'script')
 
-    def test_import_statement_raises(self):
-        err = self._raises("import { ref } from 'vue'\nexport default { name: 'x' }")
-        self.assertEqual(err.section, 'script')
-        self.assertIn('import', err.message)
+    def test_import_silently_stripped_by_default(self):
+        content = "<template><div></div></template>\n<script>import { ref } from 'vue'\nexport default {}</script>"
+        comp = VueComponent('X.vue', content)
+        self.assertEqual(comp.variables, '')
 
-    def test_import_without_space_raises(self):
-        err = self._raises("import{ref} from 'vue'\nexport default { name: 'x' }")
-        self.assertEqual(err.section, 'script')
+    def test_import_raises_with_forbid_imports(self):
+        content = "<template><div></div></template>\n<script>import { ref } from 'vue'\nexport default {}</script>"
+        with self.assertRaises(VueSectionError) as ctx:
+            VueComponent('X.vue', content, forbid_imports=True)
+        self.assertEqual(ctx.exception.section, 'script')
+        self.assertIn('import', ctx.exception.message)
+
+    def test_import_no_space_raises_with_forbid_imports(self):
+        content = "<template><div></div></template>\n<script>import{ref} from 'vue'\nexport default {}</script>"
+        with self.assertRaises(VueSectionError) as ctx:
+            VueComponent('X.vue', content, forbid_imports=True)
+        self.assertEqual(ctx.exception.section, 'script')
 
     def test_export_default_not_object(self):
         err = self._raises("export default 'string'")
         self.assertEqual(err.section, 'script')
 
     def test_str_contains_file_and_section(self):
-        err = self._raises("import x from 'x'\nexport default { name: 'x' }", file_name='MyComp.vue')
-        self.assertIn('MyComp.vue', str(err))
-        self.assertIn('[script]', str(err))
+        content = "<template><div></div></template>\n<script>import x from 'x'\nexport default {}</script>"
+        with self.assertRaises(VueSectionError) as ctx:
+            VueComponent('MyComp.vue', content, forbid_imports=True)
+        self.assertIn('MyComp.vue', str(ctx.exception))
+        self.assertIn('[script]', str(ctx.exception))
 
     def test_valid_script_no_error(self):
         content = '<template><div></div></template>\n<script>export default { data() { return {} } }</script>'
         vc = VueComponent('X.vue', content)
         self.assertEqual(vc.component, 'data() { return {} }')
 
-    def test_name_property_raises(self):
-        err = self._raises("export default { name: 'X', data() { return {} } }")
-        self.assertEqual(err.section, 'script')
-        self.assertIn('name', err.message)
+    def test_name_property_silently_stripped(self):
+        content = (
+            "<template><div></div></template>\n"
+            "<script>export default { name: 'X', data() { return {} } }</script>"
+        )
+        comp = VueComponent('X.vue', content)
+        self.assertEqual(comp.component, 'data() { return {} }')
 
 
 class TestStyleErrors(unittest.TestCase):
     """Style section validation errors."""
 
     def _raises(self, style_content, file_name='Test.vue'):
-        content = f'<template><div></div></template>\n<style>{style_content}</style>'
+        content = f'<template><div></div></template>\n<style lang="less">{style_content}</style>'
         with self.assertRaises(VueSectionError) as ctx:
             VueComponent(file_name, content)
         return ctx.exception
@@ -239,7 +253,7 @@ class TestStyleErrors(unittest.TestCase):
         self.assertIn('[style]', str(err))
 
     def test_valid_style_no_error(self):
-        content = '<template><div></div></template>\n<style>.foo { color: red; }</style>'
+        content = '<template><div></div></template>\n<style lang="less">.foo { color: red; }</style>'
         vc = VueComponent('X.vue', content)
         self.assertEqual(vc.style, '.foo{color:red;}')
 
@@ -259,8 +273,10 @@ class TestStyleLangErrors(unittest.TestCase):
             VueComponent('Test.vue', self._vue(style_open))
         return ctx.exception
 
-    def test_no_lang_accepted(self):
-        VueComponent('Test.vue', self._vue('<style>'))
+    def test_no_lang_raises(self):
+        err = self._raises('<style>')
+        self.assertEqual(err.section, 'style')
+        self.assertIn('lang', err.message)
 
     def test_lang_less_accepted(self):
         VueComponent('Test.vue', self._vue('<style lang="less">'))

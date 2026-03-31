@@ -9,7 +9,7 @@ export default {
   props: ['title', 'body']
 }
 </script>
-<style scoped>
+<style scoped lang="less">
 .card { border: 1px solid #ccc; }
 .title { font-weight: bold; }
 </style>

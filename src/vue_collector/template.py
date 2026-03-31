@@ -161,6 +161,10 @@ class CustomHTML(HTMLParser):
         if self.current_root_tag:
             self.content[self.current_root_tag].append(data)
 
+    def handle_comment(self, data: str) -> None:
+        if self.current_root_tag:
+            self.content[self.current_root_tag].append(f'<!--{data}-->')
+
     def validate(self) -> None:
         """Raise ValueError if any root section was not properly closed."""
         for tag in self.ROOT_TAGS:

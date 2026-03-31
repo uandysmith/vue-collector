@@ -11,7 +11,7 @@ import os
 import tempfile
 import unittest
 
-from vue_collector import VueComponent, VueSectionError, collect_vue, find_vue_files, prepare_compiled
+from vue_collector import VueComponent, VueSectionError, collect_vue, find_vue_files, prepare_assets, prepare_compiled
 
 FIXTURES = os.path.join(os.path.dirname(__file__), 'fixtures')
 
@@ -106,12 +106,19 @@ class TestVueComponentItemList(unittest.TestCase):
     def test_no_style(self):
         self.assertEqual(self.vc.style, '')
 
-    def test_raises_on_import_statement(self):
+    def test_import_stripped_by_default(self):
+        vue_with_import = (
+            "<template><div></div></template>\n<script>import { ref } from 'vue'\nexport default {}</script>\n"
+        )
+        comp = VueComponent('Clean.vue', vue_with_import)
+        self.assertEqual(comp.variables, '')
+
+    def test_import_raises_with_forbid_imports(self):
         vue_with_import = (
             "<template><div></div></template>\n<script>import { ref } from 'vue'\nexport default {}</script>\n"
         )
         with self.assertRaises(VueSectionError) as ctx:
-            VueComponent('Bad.vue', vue_with_import)
+            VueComponent('Bad.vue', vue_with_import, forbid_imports=True)
         self.assertEqual(ctx.exception.section, 'script')
 
 
@@ -288,6 +295,107 @@ class TestNamedSlots(unittest.TestCase):
             '<template #footer><p>Foot</p></template>'
             '</div>',
         )
+
+
+class TestImportStripping(unittest.TestCase):
+    """End-to-end: imports and components: {} are silently stripped."""
+
+    def test_component_with_imports_and_components(self):
+        vue = (
+            '<template><div>hello</div></template>\n'
+            '<script>\n'
+            "import Foo from './Foo.vue'\n"
+            "import { ref } from 'vue'\n"
+            '\n'
+            'const helper = () => 42\n'
+            '\n'
+            'export default {\n'
+            '  components: { Foo },\n'
+            '  data() { return { x: helper() } }\n'
+            '}\n'
+            '</script>'
+        )
+        comp = VueComponent('Test.vue', vue)
+        self.assertEqual(comp.variables, 'const helper = () => 42')
+        self.assertEqual(comp.component, 'data() { return { x: helper() } }')
+
+
+class TestNameStripping(unittest.TestCase):
+    """End-to-end: name property is silently stripped."""
+
+    def test_name_stripped(self):
+        vue = (
+            '<template><div>hello</div></template>\n'
+            "<script>export default { name: 'Test', data() { return {} } }</script>"
+        )
+        comp = VueComponent('Test.vue', vue)
+        self.assertEqual(comp.component, 'data() { return {} }')
+
+
+class TestMultipleVueDirs(unittest.TestCase):
+    """Multiple vue_dir directories for shared + app-specific builds."""
+
+    VUE_SHARED = '<template><div>shared</div></template>\n<script>export default {}</script>'
+    VUE_ADMIN = '<template><div>admin</div></template>\n<script>export default {}</script>'
+
+    def setUp(self):
+        self.shared_dir = tempfile.mkdtemp()
+        self.admin_dir = tempfile.mkdtemp()
+        with open(os.path.join(self.shared_dir, 'Button.vue'), 'w') as f:
+            f.write(self.VUE_SHARED)
+        with open(os.path.join(self.admin_dir, 'UserTable.vue'), 'w') as f:
+            f.write(self.VUE_ADMIN)
+
+    def test_list_of_dirs_finds_both(self):
+        files = find_vue_files([self.shared_dir, self.admin_dir])
+        names = [os.path.basename(f) for f in files]
+        self.assertIn('Button.vue', names)
+        self.assertIn('UserTable.vue', names)
+
+    def test_single_string_still_works(self):
+        files = find_vue_files(self.shared_dir)
+        self.assertEqual(len(files), 1)
+        self.assertIn('Button.vue', files[0])
+
+    def test_collect_vue_multiple_dirs(self):
+        components = list(collect_vue([self.shared_dir, self.admin_dir]))
+        names = [c.name for c in components]
+        self.assertIn('Button', names)
+        self.assertIn('UserTable', names)
+
+    def test_prepare_assets_multiple_dirs(self):
+        js, _ = prepare_assets([self.shared_dir, self.admin_dir])
+        self.assertIn("'Button'", js)
+        self.assertIn("'UserTable'", js)
+
+    def test_prepare_assets_single_dir_excludes_other(self):
+        js, _ = prepare_assets(self.shared_dir)
+        self.assertIn("'Button'", js)
+        self.assertNotIn("'UserTable'", js)
+
+    def test_last_dir_wins_on_name_conflict(self):
+        VUE_WIDGET_SHARED = '<template><div class="shared-widget"></div></template>\n<script>export default {}</script>'
+        VUE_WIDGET_ADMIN = '<template><div class="admin-widget"></div></template>\n<script>export default {}</script>'
+        with open(os.path.join(self.shared_dir, 'Widget.vue'), 'w') as f:
+            f.write(VUE_WIDGET_SHARED)
+        with open(os.path.join(self.admin_dir, 'Widget.vue'), 'w') as f:
+            f.write(VUE_WIDGET_ADMIN)
+        components = list(collect_vue([self.shared_dir, self.admin_dir]))
+        widgets = [c for c in components if c.name == 'Widget']
+        self.assertEqual(len(widgets), 1)
+        self.assertIn('admin-widget', widgets[0].raw_template)
+
+    def test_first_dir_wins_when_listed_first(self):
+        VUE_WIDGET_SHARED = '<template><div class="shared-widget"></div></template>\n<script>export default {}</script>'
+        VUE_WIDGET_ADMIN = '<template><div class="admin-widget"></div></template>\n<script>export default {}</script>'
+        with open(os.path.join(self.shared_dir, 'Widget.vue'), 'w') as f:
+            f.write(VUE_WIDGET_SHARED)
+        with open(os.path.join(self.admin_dir, 'Widget.vue'), 'w') as f:
+            f.write(VUE_WIDGET_ADMIN)
+        components = list(collect_vue([self.admin_dir, self.shared_dir]))
+        widgets = [c for c in components if c.name == 'Widget']
+        self.assertEqual(len(widgets), 1)
+        self.assertIn('shared-widget', widgets[0].raw_template)
 
 
 if __name__ == '__main__':

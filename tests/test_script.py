@@ -1,6 +1,12 @@
 import unittest
 
-from vue_collector.script import _extract_export_default, _has_import, _has_name_key, _parse_script
+from vue_collector.script import (
+    _extract_export_default,
+    _has_import,
+    _parse_script,
+    _strip_imports,
+    _strip_object_key,
+)
 
 
 class TestExtractExportDefault(unittest.TestCase):
@@ -217,15 +223,32 @@ class TestParseScript(unittest.TestCase):
         self.assertEqual(variables, '')
         self.assertIn('data() { return { x: 1 } }', component)
 
-    def test_raises_on_import_before_export(self):
+    def test_import_before_export_stripped(self):
         raw = "import { ref } from 'vue'\nexport default { setup() { return { x: ref(0) } } }"
-        with self.assertRaises(ValueError):
-            _parse_script('X', raw)
+        variables, component = _parse_script('X', raw)
+        self.assertEqual(variables, '')
+        self.assertEqual(component, 'setup() { return { x: ref(0) } }')
 
-    def test_raises_on_import_after_export(self):
+    def test_import_after_export_stripped(self):
+        raw = "export default {}\nimport { x } from './x'"
+        variables, _ = _parse_script('X', raw)
+        self.assertEqual(variables, '')
+
+    def test_forbid_imports_raises_before(self):
+        raw = "import { ref } from 'vue'\nexport default {}"
+        with self.assertRaises(ValueError):
+            _parse_script('X', raw, forbid_imports=True)
+
+    def test_forbid_imports_raises_after(self):
         raw = "export default {}\nimport { x } from './x'"
         with self.assertRaises(ValueError):
-            _parse_script('X', raw)
+            _parse_script('X', raw, forbid_imports=True)
+
+    def test_components_stripped_from_body(self):
+        raw = "import Foo from './Foo.vue'\nexport default { components: { Foo }, data() { return {} } }"
+        variables, component = _parse_script('X', raw)
+        self.assertEqual(variables, '')
+        self.assertEqual(component, 'data() { return {} }')
 
     def test_const_before_export_allowed(self):
         raw = 'const helper = () => {}\nexport default { data() { return {} } }'
@@ -254,38 +277,119 @@ class TestParseScript(unittest.TestCase):
         self.assertEqual(variables, 'const X = 1;')
 
 
-class TestHasNameKey(unittest.TestCase):
-    def test_top_level_name_key_returns_true(self):
-        self.assertTrue(_has_name_key('name: "x"'))
+class TestStripImports(unittest.TestCase):
+    def test_single_import(self):
+        self.assertEqual(_strip_imports("import { ref } from 'vue'\nconst x = 1"), 'const x = 1')
 
-    def test_top_level_name_key_with_comma_returns_true(self):
-        self.assertTrue(_has_name_key("name: 'x',\n  data() { return {} }"))
+    def test_multiple_imports(self):
+        code = "import { ref } from 'vue'\nimport Foo from './Foo.vue'\nconst x = 1"
+        self.assertEqual(_strip_imports(code), 'const x = 1')
 
-    def test_name_inside_nested_object_returns_false(self):
-        # 'name' at depth > 0 (inside data() return value) must not match
-        self.assertFalse(_has_name_key('data() { return { name: "x" } }'))
+    def test_multiline_import(self):
+        code = "import {\n  ref,\n  computed\n} from 'vue'\nconst x = 1"
+        self.assertEqual(_strip_imports(code), 'const x = 1')
 
-    def test_name_inside_string_literal_returns_false(self):
-        self.assertFalse(_has_name_key('label: "name: foo"'))
+    def test_default_import(self):
+        self.assertEqual(_strip_imports("import Foo from './Foo.vue'"), '')
 
-    def test_name_inside_single_quote_string_returns_false(self):
-        self.assertFalse(_has_name_key("label: 'name: foo'"))
+    def test_star_import(self):
+        self.assertEqual(_strip_imports("import * as utils from './utils'"), '')
 
-    def test_name_as_part_of_longer_identifier_returns_false(self):
-        # 'namespace' starts with 'name' but is not 'name:'
-        self.assertFalse(_has_name_key('namespace: "x"'))
+    def test_side_effect_import(self):
+        self.assertEqual(_strip_imports("import 'polyfill'"), '')
 
-    def test_empty_body_returns_false(self):
-        self.assertFalse(_has_name_key(''))
+    def test_no_space_import(self):
+        self.assertEqual(_strip_imports("import{ref} from 'vue'"), '')
 
-    def test_name_after_comma_returns_true(self):
-        self.assertTrue(_has_name_key('data() { return {} },\nname: "x"'))
+    def test_preserves_non_import_code(self):
+        code = 'const helper = () => {}\nconst x = 1'
+        self.assertEqual(_strip_imports(code), code)
 
-    def test_name_inside_line_comment_returns_false(self):
-        self.assertFalse(_has_name_key('// name: "x"\ndata() { return {} }'))
+    def test_import_in_string_preserved(self):
+        code = "const x = 'import y from z'"
+        self.assertEqual(_strip_imports(code), code)
 
-    def test_name_inside_block_comment_returns_false(self):
-        self.assertFalse(_has_name_key('/* name: "x" */\ndata() { return {} }'))
+    def test_import_in_comment_preserved(self):
+        code = "// import x from 'y'\nconst y = 1"
+        self.assertEqual(_strip_imports(code), code)
+
+    def test_empty_string(self):
+        self.assertEqual(_strip_imports(''), '')
+
+    def test_import_between_code(self):
+        code = "const a = 1\nimport { ref } from 'vue'\nconst b = 2"
+        self.assertEqual(_strip_imports(code), 'const a = 1\nconst b = 2')
+
+
+class TestStripObjectKey(unittest.TestCase):
+    # --- components (object value) ---
+    def test_components_simple(self):
+        self.assertEqual(
+            _strip_object_key('components: { Foo }, data() { return {} }', 'components'),
+            'data() { return {} }',
+        )
+
+    def test_components_multiline(self):
+        body = 'components: {\n  Foo,\n  Bar\n},\ndata() { return {} }'
+        self.assertEqual(_strip_object_key(body, 'components'), 'data() { return {} }')
+
+    def test_components_preserves_other_keys(self):
+        body = 'data() { return {} }'
+        self.assertEqual(_strip_object_key(body, 'components'), body)
+
+    def test_components_in_nested_object_preserved(self):
+        body = 'data() { return { components: {} } }'
+        self.assertEqual(_strip_object_key(body, 'components'), body)
+
+    def test_components_trailing_comma_removed(self):
+        body = 'components: { Foo },\ndata() { return {} }'
+        self.assertEqual(_strip_object_key(body, 'components'), 'data() { return {} }')
+
+    def test_components_only(self):
+        self.assertEqual(_strip_object_key('components: { Foo }', 'components'), '')
+
+    def test_components_after_other_key(self):
+        body = 'data() { return {} },\ncomponents: { Foo }'
+        self.assertEqual(_strip_object_key(body, 'components'), 'data() { return {} },')
+
+    # --- name (string value) ---
+    def test_name_single_quotes(self):
+        self.assertEqual(
+            _strip_object_key("name: 'Foo', data() { return {} }", 'name'),
+            'data() { return {} }',
+        )
+
+    def test_name_double_quotes(self):
+        self.assertEqual(
+            _strip_object_key('name: "Foo", data() { return {} }', 'name'),
+            'data() { return {} }',
+        )
+
+    def test_name_in_nested_not_stripped(self):
+        body = "data() { return { name: 'x' } }"
+        self.assertEqual(_strip_object_key(body, 'name'), body)
+
+    def test_name_only(self):
+        self.assertEqual(_strip_object_key("name: 'Foo'", 'name'), '')
+
+    def test_name_at_end(self):
+        self.assertEqual(_strip_object_key("data() {},\nname: 'Foo'", 'name'), 'data() {},')
+
+    # --- general ---
+    def test_empty_body(self):
+        self.assertEqual(_strip_object_key('', 'anything'), '')
+
+    def test_key_not_present_unchanged(self):
+        body = 'data() { return {} }'
+        self.assertEqual(_strip_object_key(body, 'name'), body)
+
+    def test_key_in_comment_not_stripped(self):
+        body = "// name: 'x'\ndata() { return {} }"
+        self.assertEqual(_strip_object_key(body, 'name'), body)
+
+    def test_key_in_string_not_stripped(self):
+        body = 'label: "name: foo"'
+        self.assertEqual(_strip_object_key(body, 'name'), body)
 
 
 if __name__ == '__main__':

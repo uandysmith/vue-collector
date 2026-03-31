@@ -99,6 +99,16 @@ class TestFormatTemplate(unittest.TestCase):
         html = '<div>\n  <span>\n    text\n  </span>\n</div>'
         self.assertEqual(_format_template(_format_template(html)), _format_template(html))
 
+    def test_comment_formatted(self):
+        html = '<div><!-- todo --><span>x</span></div>'
+        result = _format_template(html)
+        self.assertEqual(result, '<div>\n  <!-- todo -->\n  <span>\n    x\n  </span>\n</div>')
+
+    def test_comment_in_pre_raw(self):
+        html = '<pre><!-- keep --></pre>'
+        result = _format_template(html)
+        self.assertIn('<pre><!-- keep --></pre>', result)
+
 
 class TestFormatStyle(unittest.TestCase):
     def test_simple_rule(self):
@@ -265,13 +275,13 @@ class TestFormatVueFileContent(unittest.TestCase):
     def test_full_component(self):
         content = (
             '<script>\nexport default { data() { return {} } }\n</script>\n'
-            '<style>\n.foo { color: red; }\n</style>\n'
+            '<style lang="less">\n.foo { color: red; }\n</style>\n'
             '<template>\n<div>hello</div>\n</template>\n'
         )
         self.assertEqual(
             _format_vue_file_content(content),
             '<template>\n<div>\n  hello\n</div>\n</template>\n'
-            '<style>\n.foo {\n  color: red;\n}\n</style>\n'
+            '<style lang="less">\n.foo {\n  color: red;\n}\n</style>\n'
             '<script>\nexport default { data() { return {} } }\n</script>\n',
         )
 
@@ -284,12 +294,12 @@ class TestFormatVueFileContent(unittest.TestCase):
     def test_scoped_style_attr_preserved(self):
         content = (
             '<template>\n<div class="x"></div>\n</template>\n'
-            '<style scoped>\n.x { color: red; }\n</style>\n'
+            '<style scoped lang="less">\n.x { color: red; }\n</style>\n'
         )
         self.assertEqual(
             _format_vue_file_content(content),
             '<template>\n<div class="x">\n</div>\n</template>\n'
-            '<style scoped>\n.x {\n  color: red;\n}\n</style>\n',
+            '<style scoped lang="less">\n.x {\n  color: red;\n}\n</style>\n',
         )
 
     def test_style_lang_attr_preserved(self):

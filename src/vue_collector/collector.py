@@ -14,7 +14,7 @@ def _escape_js_template(s: str) -> str:
     return s.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
 
 
-def _content_hash(vue_dir: str) -> str:
+def _content_hash(vue_dir: str | list[str]) -> str:
     """SHA-256 (first 16 hex chars) of all .vue file contents under vue_dir, sorted by path."""
     hasher = hashlib.sha256()
     for path in sorted(find_vue_files(vue_dir)):
@@ -24,7 +24,7 @@ def _content_hash(vue_dir: str) -> str:
 
 
 class VueComponent:
-    def __init__(self, file_name: str, content: str) -> None:
+    def __init__(self, file_name: str, content: str, *, forbid_imports: bool = False) -> None:
         name = file_name.split('.vue')[0]
         self.name: str = name
         self.template_name: str = _make_template_name(name)
@@ -37,6 +37,10 @@ class VueComponent:
             raise VueSectionError(file_name, None, str(e)) from e
 
         style_lang = next((v for k, v in probe.root_attrs['style'] if k == 'lang'), None)
+        if probe.section_counts['style'] > 0 and style_lang is None:
+            raise VueSectionError(
+                file_name, 'style', '<style> must specify lang="less" for Vite compatibility'
+            )
         if style_lang is not None and style_lang.lower() != 'less':
             raise VueSectionError(file_name, 'style', f'Only LESS is supported as style language, got {style_lang!r}')
 
@@ -60,7 +64,9 @@ class VueComponent:
         self.template: str = f'<template id="{self.template_name}">{self.raw_template}</template>'
 
         try:
-            self.variables, self.component = _parse_script(name, parser.get_content('script'))
+            self.variables, self.component = _parse_script(
+                name, parser.get_content('script'), forbid_imports=forbid_imports
+            )
         except ValueError as e:
             raise VueSectionError(file_name, 'script', str(e)) from e
 
@@ -70,16 +76,23 @@ class VueComponent:
             raise VueSectionError(file_name, 'style', str(e)) from e
 
 
-def collect_vue(vue_dir: str = '.') -> Generator[VueComponent, None, None]:
+def collect_vue(vue_dir: str | list[str] = '.', *, forbid_imports: bool = False) -> Generator[VueComponent, None, None]:
+    dirs = [vue_dir] if isinstance(vue_dir, str) else vue_dir
+    seen: dict[str, VueComponent] = {}
     for full_path in find_vue_files(vue_dir):
-        rel_path = os.path.relpath(full_path, vue_dir)
-        file_name = rel_path.replace(os.sep, '')
+        for d in dirs:
+            rel = os.path.relpath(full_path, d)
+            if not rel.startswith('..'):
+                file_name = rel.replace(os.sep, '')
+                break
         with open(full_path, encoding='utf-8') as f:
-            yield VueComponent(file_name, f.read())
+            vc = VueComponent(file_name, f.read(), forbid_imports=forbid_imports)
+        seen[vc.name] = vc  # last wins: later dirs override earlier ones
+    yield from seen.values()
 
 
-def prepare_compiled(template: str, vue_dir: str = '.') -> str:
-    components = list(collect_vue(vue_dir))
+def prepare_compiled(template: str, vue_dir: str | list[str] = '.', *, forbid_imports: bool = False) -> str:
+    components = list(collect_vue(vue_dir, forbid_imports=forbid_imports))
     styles = '\n'.join(x.style for x in components)
     templates = '\n'.join(x.template for x in components)
     variables = '\n'.join(x.variables for x in components if x.variables)
@@ -94,14 +107,16 @@ def prepare_compiled(template: str, vue_dir: str = '.') -> str:
     return template
 
 
-def prepare_assets(vue_dir: str = '.', extra_js: str = '') -> tuple[str, str]:
+def prepare_assets(
+    vue_dir: str | list[str] = '.', extra_js: str = '', *, forbid_imports: bool = False
+) -> tuple[str, str]:
     """Return (js_content, css_content) for the JS+CSS asset build mode.
 
     js_content contains module-level variables and a function initComponents(app)
     that calls app.component() with inline template strings for each component.
     extra_js (if provided) is prepended to the JS output verbatim.
     """
-    components = list(collect_vue(vue_dir))
+    components = list(collect_vue(vue_dir, forbid_imports=forbid_imports))
 
     css = '\n'.join(x.style for x in components if x.style)
 
@@ -129,9 +144,11 @@ def prepare_assets(vue_dir: str = '.', extra_js: str = '') -> tuple[str, str]:
 
 
 def write_assets(
-    vue_dir: str = '.',
+    vue_dir: str | list[str] = '.',
     output_dir: str = '.',
     extra_js: str = '',
+    *,
+    forbid_imports: bool = False,
 ) -> tuple[str, str]:
     """Write components.{hash}.js and components.{hash}.css to output_dir.
 
@@ -139,7 +156,7 @@ def write_assets(
     vue_dir so filenames change whenever any component changes.
     """
     h = _content_hash(vue_dir)
-    js_content, css_content = prepare_assets(vue_dir, extra_js)
+    js_content, css_content = prepare_assets(vue_dir, extra_js, forbid_imports=forbid_imports)
     js_name = f'components.{h}.js'
     css_name = f'components.{h}.css'
     with open(os.path.join(output_dir, js_name), 'w', encoding='utf-8') as f:
@@ -149,5 +166,9 @@ def write_assets(
     return js_name, css_name
 
 
-def find_vue_files(base_dir: str = '.') -> list[str]:
-    return [str(p) for p in Path(base_dir).rglob('*.vue')]
+def find_vue_files(base_dir: str | list[str] = '.') -> list[str]:
+    dirs = [base_dir] if isinstance(base_dir, str) else base_dir
+    result: list[str] = []
+    for d in dirs:
+        result.extend(str(p) for p in Path(d).rglob('*.vue'))
+    return result

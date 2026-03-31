@@ -4,16 +4,12 @@ A pure-Python tool for compiling [Vue single-file components](https://vuejs.org/
 
 ## Purpose
 
-vue-collector is a **prototyping tool**, not a production bundler. It lets you write Vue components using plain `.vue` files and compile them from Python, without setting up a JavaScript build pipeline.
-
-A key design goal is **migration-readiness**: components are written as standard `.vue` files with plain Options API JavaScript, so when you outgrow vue-collector, moving to Vite or another Node-based bundler requires no rewriting of component logic — only a project setup change.
-
-**Language support is intentionally minimal:** plain JavaScript only, LESS for styles. TypeScript, `<script setup>`, CSS Modules, and other preprocessors are not supported and will raise errors. This is a deliberate trade-off to keep the tool dependency-free from the Node.js ecosystem while keeping component code compatible with standard Vue tooling.
+vue-collector is a **stepping stone before Vite**. It lets you write Vue components using standard `.vue` files and compile them from Python, without setting up a JavaScript build pipeline. When your project outgrows vue-collector, moving to Vite requires **no rewriting** — the same `.vue` files work in both environments.
 
 **What it is:**
 - A quick way to add Vue components to a Python backend (Flask, FastAPI, Django, etc.)
 - Suitable for internal tools, dashboards, and prototypes where plain JS is enough
-- A stepping stone: write real `.vue` files from day one, migrate to Vite later with minimal friction
+- Write real `.vue` files from day one, migrate to Vite later with zero friction
 
 **What it is not:**
 - A replacement for Vite, Webpack, or Rollup
@@ -24,18 +20,43 @@ A key design goal is **migration-readiness**: components are written as standard
 - Simplicity and zero JS tooling beats optimal bundle size for your current stage
 - You expect to migrate to a proper Vite project as the frontend grows
 
-## Component format constraints
+---
 
-Components must follow a simplified subset of the Vue SFC format:
+## Vite migration path
 
-- **`export default { ... }`** is the only supported way to define a component — no `defineComponent()`, no `<script setup>`, no other registration patterns
-- **No `name` key** in `export default` — the component name is auto-generated from the filename (`Counter.vue` → `'Counter'`)
-- **No `import` statements** in `<script>` — browser globals only (`Vue`, your app globals)
+vue-collector is designed so that every `.vue` file you write is a valid Vite component:
+
+- **Options API** `export default { ... }` is fully supported in Vue 3 / Vite
+- **`import` statements** are silently stripped by vue-collector — you can add them in advance for Vite compatibility, and vue-collector will ignore them
+- **`components: { ... }`** (local component registration) is silently stripped — same principle
+- **`name` property** is silently stripped — vue-collector auto-generates component names from filenames
+- **`<style lang="less">`** is required — this ensures Vite knows to use the LESS preprocessor (install `less` as a dev dependency in your Vite project)
+
+When you're ready to switch to Vite:
+1. Set up a Vite project (`npm create vite@latest`)
+2. Copy your `.vue` files — they work as-is
+3. The `import` statements and `components` registrations you added for forward-compatibility are now active
+4. Run `npm install less --save-dev` if your styles use LESS
+
+---
+
+## Component format
+
+Components use a simplified subset of the Vue SFC format:
+
+- **`export default { ... }`** is the only supported component definition — no `defineComponent()`, no `<script setup>`
+- **`<style lang="less">`** is required when using styles — ensures Vite compatibility. `<style scoped lang="less">` for scoped styles
 - **No `@import`** in `<style>` — inline styles only
 - **One** `<template>`, `<script>`, and `<style>` section per file
-- LESS is the only supported style language — `<style>` and `<style lang="less">` are accepted; any other `lang` value (e.g. `scss`, `stylus`) raises an error
 - **No TypeScript** — `<script lang="ts">` raises an error; plain JavaScript only
-- `<style scoped>` is supported — adds `[data-v-*]` attribute scoping automatically
+- Vue directives (`v-for`, `v-if`, `@click`, `:bind`) pass through unchanged
+- Named slots via nested `<template #slot>` are supported
+- Multiple root elements (Vue 3 fragments) are supported
+
+**Silently stripped** (allowed for Vite compatibility, ignored by vue-collector):
+- `import` statements in `<script>`
+- `components: { ... }` in `export default`
+- `name` property in `export default`
 
 ```vue
 <!-- components/Counter.vue -->
@@ -46,7 +67,7 @@ Components must follow a simplified subset of the Vue SFC format:
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="less">
 .counter { display: flex; gap: 8px; }
 button { cursor: pointer; }
 </style>
@@ -250,6 +271,44 @@ paths_to_watch = find_vue_files('vue/')
 
 ---
 
+## Multiple source directories
+
+All functions that accept `vue_dir` also accept a list of directories. This enables shared component libraries across builds:
+
+```
+project/
+├── shared/           # components used by all builds
+│   ├── Button.vue
+│   └── Card.vue
+├── admin/            # admin-only components
+│   └── UserTable.vue
+└── static/
+```
+
+```python
+from vue_collector import write_assets
+
+# Public build — shared components only
+js, css = write_assets(vue_dir='shared/', output_dir='static')
+
+# Admin build — shared + admin components
+js, css = write_assets(vue_dir=['shared/', 'admin/'], output_dir='static')
+```
+
+**Name conflicts — last directory wins.** If two directories contain a component with the same name, the last directory in the list takes priority:
+
+```
+shared/Button.vue   ← base version
+admin/Button.vue    ← overrides shared version in admin build
+```
+
+```python
+# admin/Button.vue is used; shared/Button.vue is ignored for this build
+js, css = write_assets(vue_dir=['shared/', 'admin/'], output_dir='static')
+```
+
+---
+
 ## Low-level API
 
 ```python
@@ -311,18 +370,22 @@ Files already correctly formatted are left untouched (idempotent).
 
 ## Limitations
 
-| Feature | Supported |
+| Feature | Status |
 |---|---|
-| LESS compilation | Yes — only supported style language; CSS compiles fine without an explicit `lang` attribute |
-| `<style scoped>` | Yes |
+| LESS compilation | Supported — `<style lang="less">` required |
+| `<style scoped>` | Supported |
 | Vue directives (`v-for`, `v-if`, `@click`, `:bind`) | Pass-through (not validated) |
-| `export default {}` as component definition | Yes (only supported form) |
-| `defineComponent()` / `<script setup>` | **No** |
-| `import` in `<script>` | **No** |
-| `@import` in `<style>` | **No** |
-| TypeScript | **No** |
-| Multiple root elements (Vue 3 fragments) | **No** (parser expects one root) |
-| CSS Modules | **No** |
+| Named slots (`<template #slot>`) | Supported |
+| Multiple root elements (Vue 3 fragments) | Supported |
+| `export default {}` as component definition | Supported (only supported form) |
+| `import` in `<script>` | Silently stripped |
+| `components: {}` in `export default` | Silently stripped |
+| `name` in `export default` | Silently stripped |
+| `defineComponent()` / `<script setup>` | Not supported |
+| `@import` in `<style>` | Not supported |
+| TypeScript | Not supported |
+| SCSS / Sass / Stylus | Not supported |
+| CSS Modules | Not supported |
 
 ## License
 
